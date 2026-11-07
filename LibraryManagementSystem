@@ -1,0 +1,608 @@
+package yes;
+
+import javax.swing.*;
+import javax.swing.table.DefaultTableModel;
+import java.awt.*;
+import java.awt.event.*;
+import java.time.LocalDate;
+import java.time.format.DateTimeFormatter;
+import java.util.*;
+
+// ---------- simple data classes ----------
+class Book {
+    String isbn;
+    String title;
+    String author;
+    int year;
+    int copies;
+
+    Book(String isbn, String title, String author, int year, int copies) {
+        this.isbn = isbn;
+        this.title = title;
+        this.author = author;
+        this.year = year;
+        this.copies = copies;
+    }
+}
+
+class BorrowRecord {
+    String memberId;
+    String isbn;
+    String dueDate;
+
+    BorrowRecord(String memberId, String isbn, String dueDate) {
+        this.memberId = memberId;
+        this.isbn = isbn;
+        this.dueDate = dueDate;
+    }
+}
+
+// ---------- main program ----------
+public class LibraryManagementSystem extends JFrame implements ActionListener {
+
+    // Data structures
+    HashMap<String, Book> books = new HashMap<String, Book>();          // ISBN -> Book
+    LinkedList<BorrowRecord> borrowed = new LinkedList<BorrowRecord>(); // borrowed books
+    TreeMap<String, String> members = new TreeMap<String, String>();    // member ID -> name
+
+    // Look and feel
+    Color navy = new Color(20, 42, 78);
+    Color lightBg = new Color(242, 244, 250);
+    Color green = new Color(221, 239, 201);
+    Color red = new Color(248, 215, 218);
+    Font normalFont = new Font("SansSerif", Font.PLAIN, 14);
+    Font boldFont = new Font("SansSerif", Font.BOLD, 14);
+    DateTimeFormatter dateFormat = DateTimeFormatter.ofPattern("MM/dd/yyyy");
+
+    // Page switching
+    CardLayout cards = new CardLayout();
+    JPanel content = new JPanel(cards);
+    ArrayList<JButton> backButtons = new ArrayList<JButton>();
+
+    // Main menu buttons
+    JButton btnAdd, btnSearch, btnMembers, btnBorrow, btnReturn, btnExit;
+
+    // Add Book page
+    JTextField tfIsbn = new JTextField();
+    JTextField tfTitle = new JTextField();
+    JTextField tfAuthor = new JTextField();
+    JTextField tfYear = new JTextField();
+    JTextField tfCopies = new JTextField();
+    JButton btnAddBook, btnClear;
+    JLabel lblAddStatus = new JLabel();
+
+    // Search page
+    JComboBox<String> cbSearchBy = new JComboBox<String>(new String[]{"ISBN", "Title"});
+    JTextField tfQuery = new JTextField(18);
+    JButton btnSearchGo;
+    JLabel lblSearchResult = new JLabel();
+    JLabel lblSearchStatus = new JLabel();
+
+    // Members page
+    JTextField tfMemberId = new JTextField(8);
+    JTextField tfMemberName = new JTextField(14);
+    JButton btnAddMember, btnRemoveMember;
+    DefaultTableModel membersModel = new DefaultTableModel(new String[]{"Member ID", "Name"}, 0);
+    JTable membersTable = new JTable(membersModel);
+    JLabel lblMemberStatus = new JLabel();
+
+    // Borrow page
+    JComboBox<String> cbMember = new JComboBox<String>();
+    JComboBox<String> cbIsbn = new JComboBox<String>();
+    JTextField tfDue = new JTextField();
+    JButton btnBorrowGo, btnViewBorrowed;
+    JLabel lblBorrowStatus = new JLabel();
+
+    // Return page
+    DefaultTableModel borrowedModel = new DefaultTableModel(new String[]{"Member ID", "ISBN", "Due Date"}, 0);
+    JTable borrowedTable = new JTable(borrowedModel);
+    JButton btnReturnGo;
+    JLabel lblReturnStatus = new JLabel();
+
+    // ---------- constructor ----------
+    public LibraryManagementSystem() {
+        super("Library Management System");
+
+        // sample data
+        books.put("978-0201616224", new Book("978-0201616224", "The Pragmatic Programmer", "Andrew Hunt", 1999, 3));
+        books.put("978-1491950296", new Book("978-1491950296", "Building Microservices", "Sam Newman", 2015, 2));
+        members.put("M001", "Alice Reyes");
+        members.put("M002", "Ben Santos");
+        members.put("M003", "Carla Lim");
+
+        setSize(1000, 600);
+        setDefaultCloseOperation(EXIT_ON_CLOSE);
+        setLocationRelativeTo(null);
+        setLayout(new BorderLayout());
+
+        add(makeSidebar(), BorderLayout.WEST);
+
+        content.add(makeMenuPage(), "menu");
+        content.add(makeAddPage(), "add");
+        content.add(makeSearchPage(), "search");
+        content.add(makeMembersPage(), "members");
+        content.add(makeBorrowPage(), "borrow");
+        content.add(makeReturnPage(), "return");
+        add(content, BorderLayout.CENTER);
+
+        cards.show(content, "menu");
+    }
+
+    // ---------- small helper methods ----------
+    JButton makeButton(String text, Color color) {
+        JButton b = new JButton(text);
+        b.setBackground(color);
+        b.setForeground(Color.WHITE);
+        b.setFont(boldFont);
+        b.setOpaque(true);
+        b.setFocusPainted(false);
+        b.addActionListener(this);
+        return b;
+    }
+
+    void setupStatus(JLabel label) {
+        label.setOpaque(true);
+        label.setFont(normalFont);
+        label.setVisible(false);
+    }
+
+    void showStatus(JLabel label, String message, boolean ok) {
+        label.setText("  " + message);
+        if (ok) {
+            label.setBackground(green);
+        } else {
+            label.setBackground(red);
+        }
+        label.setVisible(true);
+    }
+
+    void addRow(JPanel form, String labelText, JComponent field) {
+        JLabel label = new JLabel(labelText);
+        label.setFont(normalFont);
+        field.setFont(normalFont);
+        form.add(label);
+        form.add(field);
+    }
+
+    // Wraps a body panel with a navy title bar and a Back button
+    JPanel makePage(String title, JPanel body) {
+        JPanel page = new JPanel(new BorderLayout(0, 10));
+        page.setBackground(lightBg);
+
+        JLabel header = new JLabel("  " + title);
+        header.setOpaque(true);
+        header.setBackground(navy);
+        header.setForeground(Color.WHITE);
+        header.setFont(new Font("SansSerif", Font.BOLD, 22));
+        header.setPreferredSize(new Dimension(100, 50));
+
+        JButton back = makeButton("Back to Menu", Color.GRAY);
+        backButtons.add(back);
+        JPanel bottom = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bottom.setOpaque(false);
+        bottom.add(back);
+
+        page.add(header, BorderLayout.NORTH);
+        page.add(body, BorderLayout.CENTER);
+        page.add(bottom, BorderLayout.SOUTH);
+        return page;
+    }
+
+    // ---------- sidebar ----------
+    JPanel makeSidebar() {
+        JPanel side = new JPanel(new GridLayout(5, 1));
+        side.setBackground(navy);
+        side.setPreferredSize(new Dimension(200, 0));
+
+        String[] lines = {"", "Library", "Management", "System", ""};
+        for (int i = 0; i < lines.length; i++) {
+            JLabel l = new JLabel(lines[i], SwingConstants.CENTER);
+            l.setForeground(Color.WHITE);
+            l.setFont(new Font("SansSerif", Font.BOLD, 22));
+            side.add(l);
+        }
+        return side;
+    }
+
+    // ---------- Figure 1: Main Menu ----------
+    JPanel makeMenuPage() {
+        JPanel page = new JPanel(new GridBagLayout());
+        page.setBackground(lightBg);
+
+        JPanel box = new JPanel(new GridLayout(8, 1, 0, 8));
+        box.setOpaque(false);
+
+        JLabel title = new JLabel("Welcome to the Library!", SwingConstants.CENTER);
+        title.setFont(new Font("SansSerif", Font.BOLD, 28));
+        JLabel sub = new JLabel("Choose an option:", SwingConstants.CENTER);
+        sub.setFont(normalFont);
+
+        btnAdd = makeButton("+   Add Book", navy);
+        btnSearch = makeButton("Search Book", navy);
+        btnMembers = makeButton("Manage Members", navy);
+        btnBorrow = makeButton("Borrow Book", navy);
+        btnReturn = makeButton("Return Book", navy);
+        btnExit = makeButton("Exit", navy);
+
+        box.add(title);
+        box.add(sub);
+        box.add(btnAdd);
+        box.add(btnSearch);
+        box.add(btnMembers);
+        box.add(btnBorrow);
+        box.add(btnReturn);
+        box.add(btnExit);
+
+        page.add(box);
+        return page;
+    }
+
+    // ---------- Figure 2: Add Book ----------
+    JPanel makeAddPage() {
+        JPanel form = new JPanel(new GridLayout(5, 2, 10, 10));
+        form.setOpaque(false);
+        addRow(form, "ISBN:", tfIsbn);
+        addRow(form, "Title:", tfTitle);
+        addRow(form, "Author:", tfAuthor);
+        addRow(form, "Year:", tfYear);
+        addRow(form, "Copies:", tfCopies);
+
+        btnAddBook = makeButton("Add Book", navy);
+        btnClear = makeButton("Clear", Color.GRAY);
+        JPanel buttons = new JPanel(new FlowLayout());
+        buttons.setOpaque(false);
+        buttons.add(btnAddBook);
+        buttons.add(btnClear);
+
+        setupStatus(lblAddStatus);
+
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setOpaque(false);
+        body.add(form, BorderLayout.NORTH);
+        body.add(buttons, BorderLayout.CENTER);
+        body.add(lblAddStatus, BorderLayout.SOUTH);
+        return makePage("Add New Book", body);
+    }
+
+    // ---------- Figure 3: Search Book ----------
+    JPanel makeSearchPage() {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.setOpaque(false);
+        btnSearchGo = makeButton("Search", navy);
+        bar.add(new JLabel("Search by:"));
+        bar.add(cbSearchBy);
+        bar.add(tfQuery);
+        bar.add(btnSearchGo);
+        tfQuery.addActionListener(this); // pressing Enter also searches
+
+        lblSearchResult.setFont(new Font("SansSerif", Font.PLAIN, 16));
+        lblSearchResult.setVerticalAlignment(SwingConstants.TOP);
+        setupStatus(lblSearchStatus);
+
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setOpaque(false);
+        body.add(bar, BorderLayout.NORTH);
+        body.add(lblSearchResult, BorderLayout.CENTER);
+        body.add(lblSearchStatus, BorderLayout.SOUTH);
+        return makePage("Search Book", body);
+    }
+
+    // ---------- Manage Members ----------
+    JPanel makeMembersPage() {
+        JPanel bar = new JPanel(new FlowLayout(FlowLayout.LEFT));
+        bar.setOpaque(false);
+        btnAddMember = makeButton("Add Member", navy);
+        btnRemoveMember = makeButton("Remove Selected", Color.GRAY);
+        bar.add(new JLabel("ID:"));
+        bar.add(tfMemberId);
+        bar.add(new JLabel("Name:"));
+        bar.add(tfMemberName);
+        bar.add(btnAddMember);
+        bar.add(btnRemoveMember);
+
+        setupStatus(lblMemberStatus);
+        loadMembersTable();
+
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setOpaque(false);
+        body.add(bar, BorderLayout.NORTH);
+        body.add(new JScrollPane(membersTable), BorderLayout.CENTER);
+        body.add(lblMemberStatus, BorderLayout.SOUTH);
+        return makePage("Manage Members", body);
+    }
+
+    // ---------- Figure 4: Borrow Book ----------
+    JPanel makeBorrowPage() {
+        JPanel form = new JPanel(new GridLayout(3, 2, 10, 10));
+        form.setOpaque(false);
+        addRow(form, "Member ID:", cbMember);
+        addRow(form, "ISBN:", cbIsbn);
+        addRow(form, "Due Date (MM/dd/yyyy):", tfDue);
+
+        btnBorrowGo = makeButton("Borrow Book", navy);
+        btnViewBorrowed = makeButton("View Borrowed", Color.GRAY);
+        JPanel buttons = new JPanel(new FlowLayout());
+        buttons.setOpaque(false);
+        buttons.add(btnBorrowGo);
+        buttons.add(btnViewBorrowed);
+
+        setupStatus(lblBorrowStatus);
+        loadBorrowBoxes();
+
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setOpaque(false);
+        body.add(form, BorderLayout.NORTH);
+        body.add(buttons, BorderLayout.CENTER);
+        body.add(lblBorrowStatus, BorderLayout.SOUTH);
+        return makePage("Borrow Book", body);
+    }
+
+    // ---------- Figure 5: Currently Borrowed Books ----------
+    JPanel makeReturnPage() {
+        btnReturnGo = makeButton("Return Book", navy);
+        JPanel buttons = new JPanel(new FlowLayout());
+        buttons.setOpaque(false);
+        buttons.add(btnReturnGo);
+
+        setupStatus(lblReturnStatus);
+
+        JPanel south = new JPanel(new BorderLayout(0, 10));
+        south.setOpaque(false);
+        south.add(buttons, BorderLayout.NORTH);
+        south.add(lblReturnStatus, BorderLayout.SOUTH);
+
+        JPanel body = new JPanel(new BorderLayout(0, 10));
+        body.setOpaque(false);
+        body.add(new JScrollPane(borrowedTable), BorderLayout.CENTER);
+        body.add(south, BorderLayout.SOUTH);
+        return makePage("Currently Borrowed Books", body);
+    }
+
+    // ---------- refresh methods ----------
+    void loadMembersTable() {
+        membersModel.setRowCount(0);
+        for (String id : members.keySet()) {
+            membersModel.addRow(new Object[]{id, members.get(id)});
+        }
+    }
+
+    void loadBorrowedTable() {
+        borrowedModel.setRowCount(0);
+        for (BorrowRecord r : borrowed) {
+            borrowedModel.addRow(new Object[]{r.memberId, r.isbn, r.dueDate});
+        }
+    }
+
+    void loadBorrowBoxes() {
+        cbMember.removeAllItems();
+        for (String id : members.keySet()) {
+            cbMember.addItem(id);
+        }
+        cbIsbn.removeAllItems();
+        for (String isbn : new TreeSet<String>(books.keySet())) {
+            cbIsbn.addItem(isbn);
+        }
+        tfDue.setText(LocalDate.now().plusDays(14).format(dateFormat));
+    }
+
+    // ---------- button actions ----------
+    public void actionPerformed(ActionEvent e) {
+        Object source = e.getSource();
+
+        // Back buttons
+        if (backButtons.contains(source)) {
+            cards.show(content, "menu");
+
+        // Main menu
+        } else if (source == btnAdd) {
+            lblAddStatus.setVisible(false);
+            cards.show(content, "add");
+        } else if (source == btnSearch) {
+            lblSearchStatus.setVisible(false);
+            lblSearchResult.setText("");
+            cards.show(content, "search");
+        } else if (source == btnMembers) {
+            lblMemberStatus.setVisible(false);
+            loadMembersTable();
+            cards.show(content, "members");
+        } else if (source == btnBorrow) {
+            lblBorrowStatus.setVisible(false);
+            loadBorrowBoxes();
+            cards.show(content, "borrow");
+        } else if (source == btnReturn || source == btnViewBorrowed) {
+            lblReturnStatus.setVisible(false);
+            loadBorrowedTable();
+            cards.show(content, "return");
+        } else if (source == btnExit) {
+            System.exit(0);
+
+        // Add Book page
+        } else if (source == btnAddBook) {
+            addBook();
+        } else if (source == btnClear) {
+            tfIsbn.setText("");
+            tfTitle.setText("");
+            tfAuthor.setText("");
+            tfYear.setText("");
+            tfCopies.setText("");
+            lblAddStatus.setVisible(false);
+
+        // Search page
+        } else if (source == btnSearchGo || source == tfQuery) {
+            searchBook();
+
+        // Members page
+        } else if (source == btnAddMember) {
+            addMember();
+        } else if (source == btnRemoveMember) {
+            removeMember();
+
+        // Borrow and return
+        } else if (source == btnBorrowGo) {
+            borrowBook();
+        } else if (source == btnReturnGo) {
+            returnBook();
+        }
+    }
+
+    void addBook() {
+        String isbn = tfIsbn.getText().trim();
+        String title = tfTitle.getText().trim();
+        String author = tfAuthor.getText().trim();
+
+        if (isbn.equals("") || title.equals("") || author.equals("")) {
+            showStatus(lblAddStatus, "ISBN, title and author are required.", false);
+            return;
+        }
+
+        int year;
+        int copies;
+        try {
+            year = Integer.parseInt(tfYear.getText().trim());
+            copies = Integer.parseInt(tfCopies.getText().trim());
+        } catch (NumberFormatException ex) {
+            showStatus(lblAddStatus, "Year and copies must be numbers.", false);
+            return;
+        }
+        if (copies <= 0) {
+            showStatus(lblAddStatus, "Copies must be more than 0.", false);
+            return;
+        }
+
+        if (books.containsKey(isbn)) {
+            books.get(isbn).copies = books.get(isbn).copies + copies;
+            showStatus(lblAddStatus, "ISBN already exists - copies added.", true);
+        } else {
+            books.put(isbn, new Book(isbn, title, author, year, copies));
+            showStatus(lblAddStatus, "Book added successfully!", true);
+        }
+
+        tfIsbn.setText("");
+        tfTitle.setText("");
+        tfAuthor.setText("");
+        tfYear.setText("");
+        tfCopies.setText("");
+    }
+
+    void searchBook() {
+        String query = tfQuery.getText().trim();
+        lblSearchStatus.setVisible(false);
+        lblSearchResult.setText("");
+
+        if (query.equals("")) {
+            showStatus(lblSearchStatus, "Enter something to search for.", false);
+            return;
+        }
+
+        Book found = null;
+        if (cbSearchBy.getSelectedItem().equals("ISBN")) {
+            found = books.get(query);
+        } else {
+            for (Book b : books.values()) {
+                if (b.title.toLowerCase().contains(query.toLowerCase())) {
+                    found = b;
+                    break;
+                }
+            }
+        }
+
+        if (found == null) {
+            showStatus(lblSearchStatus, "No book found.", false);
+        } else {
+            lblSearchResult.setText("<html><br>Title: " + found.title
+                    + "<br><br>Author: " + found.author
+                    + "<br><br>Year: " + found.year
+                    + "<br><br>Available Copies: " + found.copies + "</html>");
+        }
+    }
+
+    void addMember() {
+        String id = tfMemberId.getText().trim().toUpperCase();
+        String name = tfMemberName.getText().trim();
+
+        if (id.equals("") || name.equals("")) {
+            showStatus(lblMemberStatus, "Member ID and name are required.", false);
+        } else if (members.containsKey(id)) {
+            showStatus(lblMemberStatus, "Member ID already exists.", false);
+        } else {
+            members.put(id, name);
+            tfMemberId.setText("");
+            tfMemberName.setText("");
+            loadMembersTable();
+            showStatus(lblMemberStatus, "Member added successfully!", true);
+        }
+    }
+
+    void removeMember() {
+        int row = membersTable.getSelectedRow();
+        if (row < 0) {
+            showStatus(lblMemberStatus, "Select a member first.", false);
+            return;
+        }
+        String id = (String) membersModel.getValueAt(row, 0);
+
+        for (BorrowRecord r : borrowed) {
+            if (r.memberId.equals(id)) {
+                showStatus(lblMemberStatus, "Member still has borrowed books.", false);
+                return;
+            }
+        }
+        members.remove(id);
+        loadMembersTable();
+        showStatus(lblMemberStatus, "Member removed.", true);
+    }
+
+    void borrowBook() {
+        String memberId = (String) cbMember.getSelectedItem();
+        String isbn = (String) cbIsbn.getSelectedItem();
+        String due = tfDue.getText().trim();
+
+        if (memberId == null || isbn == null) {
+            showStatus(lblBorrowStatus, "Add a member and a book first.", false);
+            return;
+        }
+
+        // check the date format
+        try {
+            LocalDate.parse(due, dateFormat);
+        } catch (Exception ex) {
+            showStatus(lblBorrowStatus, "Due date must look like 11/28/2026.", false);
+            return;
+        }
+
+        Book book = books.get(isbn);
+        if (book.copies <= 0) {
+            showStatus(lblBorrowStatus, "No copies available.", false);
+            return;
+        }
+
+        book.copies = book.copies - 1;
+        borrowed.add(new BorrowRecord(memberId, isbn, due));
+        showStatus(lblBorrowStatus, "Book borrowed successfully!", true);
+    }
+
+    void returnBook() {
+        int row = borrowedTable.getSelectedRow();
+        if (row < 0) {
+            showStatus(lblReturnStatus, "Select a borrowed book first.", false);
+            return;
+        }
+
+        BorrowRecord record = borrowed.remove(row); // table rows match list positions
+        Book book = books.get(record.isbn);
+        book.copies = book.copies + 1;
+
+        loadBorrowedTable();
+        showStatus(lblReturnStatus, "Book returned successfully!", true);
+    }
+
+    // ---------- start the program ----------
+    public static void main(String[] args) {
+        try {
+            UIManager.setLookAndFeel(UIManager.getCrossPlatformLookAndFeelClassName());
+        } catch (Exception ex) {
+            // use the default look
+        }
+        new LibraryManagementSystem().setVisible(true);
+    }
+}
